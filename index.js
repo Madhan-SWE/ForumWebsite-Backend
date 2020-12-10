@@ -41,6 +41,7 @@ app.post("/register", async (req, res) => {
         }
         console.log(data);
         data.password = await bcrypt.hash(data.password, salt);
+        data.userType = "standardUser"
         console.log(data);
 
         result = await db.collection("users").insertOne(data);
@@ -56,6 +57,51 @@ app.post("/register", async (req, res) => {
         });
     }
 });
+
+
+app.get("/checkLogin", [authorizeUser],  async (req, res) => {
+    try {
+        if(!req.headers.authorization)
+        {
+            res.status(404).json({
+                message: "Token not found!",
+                result: false
+            })
+        }
+        
+        let authHeader = req.headers.authorization;
+        let decodedHeader = jwt_decode(authHeader);
+        console.log("decoded header:", decodedHeader)
+        let email = decodedHeader.email;
+
+        let client = await mongodb.connect(dbUrl);
+        let db = client.db("ForumWebsiteDB");
+        let data = await db
+            .collection("users")
+            .findOne({ email: email });
+        
+            console.log("data", data)
+        let resultData = {
+            email: data.email,
+            userName: data.userName,
+            role: data.userType
+        }
+        res.status(200).json({
+            result: true,
+            message: "login successful",
+            body: resultData
+        });
+
+        client.close(); 
+    }catch (error) {
+        console.log(error);
+        res.status(500).json({
+            message: "Internal Server error",
+            result: false,
+        });
+    }
+});
+
 
 app.post("/login", async (req, res) => {
     try {
@@ -74,6 +120,7 @@ app.post("/login", async (req, res) => {
                     {
                         userId: data._id,
                         email: data.email,
+                        userName: data.userName
                     },
                     process.env.JWT_KEY,
                     { expiresIn: "1h" }
@@ -83,7 +130,7 @@ app.post("/login", async (req, res) => {
                 res.status(200).json({
                     result: true,
                     message: "login successful",
-                    token,
+                    token
                 });
             } else {
                 res.status(403).json({
@@ -107,17 +154,17 @@ app.post("/login", async (req, res) => {
     }
 });
 
-app.post("/topics", async (req, res) => {
+
+
+app.post("/topics", [authorizeUser, allowPermittedUser(['adminUser', 'standardUser'])], async (req, res) => {
     try {
         let client = await mongodb.connect(dbUrl);
         let db = client.db("ForumWebsiteDB");
         let data = req.body;
-        // let authHeader = req.headers.authorization;
-        // let decodedHeader = jwt_decode(authHeader);
-        // let email = decodedHeader.email;
-        // let userName = decodedHeader.userName;
-        let email = "rcmadhankumar@gmail.com";
-        let userName = "Madhankumar Chellamuthu";
+        let authHeader = req.headers.authorization;
+        let decodedHeader = jwt_decode(authHeader);
+        let email = decodedHeader.email;
+        let userName = decodedHeader.userName;
 
         let result = await db
             .collection("topics")
@@ -153,14 +200,15 @@ app.post("/topics", async (req, res) => {
 });
 
 /* route to add topic */
-app.post("/topics/:topicId", async (req, res) => {
+app.post("/topics/:topicId",  [authorizeUser, allowPermittedUser(['adminUser', 'standardUser'])], async (req, res) => {
     try {
         let client = await mongodb.connect(dbUrl);
         let db = client.db("ForumWebsiteDB");
         let topicId = ObjectId(req.params.topicId);
-
-        let email = "rcmadhankumar@gmail.com";
-        let userName = "Madhankumar Chellamuthu";
+        let authHeader = req.headers.authorization;
+        let decodedHeader = jwt_decode(authHeader);
+        let email = decodedHeader.email;
+        let userName = decodedHeader.userName;
 
         //check if topic exists
         let result = await db.collection("topics").findOne({ _id: topicId });
@@ -222,62 +270,23 @@ app.get("/topics", async (req, res) => {
     try {
         let client = await mongodb.connect(dbUrl);
         let db = client.db("ForumWebsiteDB");
-
         //get content
-        let result = await db.collection("topics").find()
+        let search = "";
+        if(req.query.search) search = req.query.search;
+        console.log(req.query)
+
+        let result = await db.collection("topics").find({
+            // topic: ""
+            topic: {
+                $regex: search
+            }
+        })
         .project({
             _id: 1,
             topic: 1
         });
 
-        // console.log(result);
-
-        // let fromDate = null;
-        // let toDate = null;
-        // let condition = [];
-
-        // if (req.query.fromDate) fromDate = req.query.fromDate;
-        // if (fromDate) {
-        //     let query = {
-        //         $gte: ["$$this.createdOn", new Date(fromDate)],
-        //     };
-        //     condition.push(query);
-        // }
-        // console.log(req.query);
-        // if (req.query.toDate) toDate = req.query.toDate;
-        // if (toDate) {
-        //     let query = {
-        //         $lte: ["$$this.createdOn", new Date(toDate)],
-        //     };
-        //     condition.push(query);
-        // }
-
-        // console.log(condition);
-        // // console.log(result);
-
-        // result = await db
-        //     .collection("topics")
-        //     .aggregate([
-        //         {
-        //             $match: {
-        //                 _id: topicId,
-        //             },
-        //         },
-        //     ])
-        //     .project({
-        //         topic: 1,
-        //         discussion: {
-        //             $filter: {
-        //                 input: "$discussion",
-        //                 cond: {
-        //                     $and: condition,
-        //                 },
-        //             },
-        //         },
-        //     })
-        //     .sort({
-        //         "discussion.createdOn": 1,
-        //     });
+        
 
         result = await result.toArray();
         console.log(result);
@@ -385,7 +394,7 @@ app.get("/topics/:topicId", async (req, res) => {
 });
 
 /* route to delete content of a topic */
-app.delete("/topics/:topicId", async (req, res) => {
+app.delete("/topics/:topicId",  [authorizeUser, allowPermittedUser(['adminUser'],)], async (req, res) => {
     try {
         let client = await mongodb.connect(dbUrl);
         let db = client.db("ForumWebsiteDB");
@@ -443,7 +452,7 @@ app.delete("/topics/:topicId", async (req, res) => {
 
 
 /* route to delete content of a topic */
-app.put("/topics/:topicId", async (req, res) => {
+app.put("/topics/:topicId",  [authorizeUser, allowPermittedUser(['adminUser', 'standardUser'])], async (req, res) => {
     try {
         let client = await mongodb.connect(dbUrl);
         let db = client.db("ForumWebsiteDB");
@@ -479,15 +488,6 @@ app.put("/topics/:topicId", async (req, res) => {
             }
         })
 
-        // console.log(result)
-
-        // result = await db.collection("topics").updateOne({
-        //     _id: topicId
-        // },{
-        //     $pull: {
-        //         "discussion": null
-        //     }
-        // })
         
         res.status(200).json({
             message: "Delete Successful!",

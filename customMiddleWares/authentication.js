@@ -36,9 +36,10 @@ function authorizeUser(req, res, next) {
   }
 
 
-  function allowPermittedUser(role) {
+  function allowPermittedUser(roles) {
     return function (req, res, next) {
-      if (req.role && req.role == role) {
+      console.log(req.body)
+      if (req.body.role && roles.includes(req.body.role)) {
         next();
       } else {
         res.status(403).json({
